@@ -141,13 +141,6 @@ data/rag.db             İlk çalıştırmada oluşur
 
 ## Bilinen sınırlamalar
 
-- Kullanıcı sorgusu Türkçe, veri seti İngilizce. Hibrit skorun etiket
-  örtüşmesi bileşeni (%60 ağırlık) bu yüzden İngilizce Blender jargonuna
-  (modifier, UV, rigging, low-poly gibi Türkçe konuşmada da genelde
-  İngilizce kalan terimlere) dayanıyor; semantik benzerlik bileşeni
-  (%40) ise çok dilli embedding modeli (`qwen3-embedding-0.6b`) sayesinde
-  Türkçe↔İngilizce eşleşmeyi zaten sağlıyor. Sorguda hiç İngilizce
-  Blender terimi geçmiyorsa öneri kalitesi düşebilir.
 - Getirme, tıpkı orijinal projede olduğu gibi her zaman en iyi K adayı
   döndürür — sabit bir benzerlik eşiği yok. Alakasız bir istek geldiğinde
   "iyi bir eşleşme yok" kararını modelin kendisi, sistem promptundaki
