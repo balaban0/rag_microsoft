@@ -1,8 +1,8 @@
-"""CLI entry point for the offline local RAG Q&A assistant.
+"""Offline Blender öğrenme rehberi asistanı için CLI giriş noktası.
 
-Usage:
-    python main.py               # ingest (if needed) and start an interactive Q&A session
-    python main.py --reingest    # force re-ingestion of docs/ before starting
+Kullanım:
+    python -m source.main               # gerekirse ingest eder, interaktif oturum başlatır
+    python -m source.main --reingest    # dataset_raw/blender_qa.json'ı yeniden ingest etmeye zorlar
 """
 import argparse
 import sys
@@ -14,46 +14,58 @@ import source.retrieval as retrieval
 from source.foundry_client import FoundryClient
 
 
-def build_context(chunks):
-    parts = [f"[Source: {c['source']}]\n{c['content']}" for c in chunks]
-    return "\n\n---\n\n".join(parts)
+def build_context(tutorial):
+    tags = ", ".join(tutorial["tags"])
+    return (
+        f"Gerçek Blender Stack Exchange sorusu: {tutorial['title']}\n"
+        f"Etiketler: {tags}\n"
+        f"Problem açıklaması: {tutorial['question']}\n\n"
+        f"Kabul edilen cevap:\n{tutorial['answer']}"
+    )
 
 
-def answer_query(client, question):
-    query_embedding = client.embed([question])[0]
-    top_chunks = retrieval.get_top_chunks(query_embedding)
-    if not top_chunks:
-        return "I don't have that information in my documents.", []
+def is_another_request(text):
+    lowered = text.lower()
+    return any(phrase in lowered for phrase in config.ANOTHER_REQUEST_PHRASES)
 
-    context = build_context(top_chunks)
-    user_prompt = f"Context:\n{context}\n\nQuestion: {question}"
+
+def get_recommendation(client, query_text, exclude_ids=None):
+    query_embedding = client.embed([query_text])[0]
+    candidates = retrieval.get_candidates(query_text, query_embedding, exclude_ids=exclude_ids, k=1)
+    if not candidates:
+        return config.NO_MATCH_MESSAGE, None
+
+    tutorial = candidates[0]
+    context = build_context(tutorial)
+    user_prompt = f"Kullanıcı isteği: {query_text}\n\nBağlam:\n{context}"
     answer = client.chat(config.SYSTEM_PROMPT, user_prompt)
-    return answer, top_chunks
+    return answer, tutorial
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Local offline RAG Q&A assistant")
+    parser = argparse.ArgumentParser(description="Offline Blender öğrenme rehberi asistanı")
     parser.add_argument(
         "--reingest",
         action="store_true",
-        help="Re-run document ingestion even if the database already has data",
+        help="Veritabanında zaten veri olsa bile rehber ingest'ini yeniden çalıştır",
     )
     args = parser.parse_args()
 
-    print("Initializing Foundry Local models (first run may take a while)...")
+    print("Foundry Local modelleri başlatılıyor (ilk çalıştırma biraz sürebilir)...")
     client = FoundryClient(config.CHAT_MODEL_ALIAS, config.EMBEDDING_MODEL_ALIAS)
 
     db.init_db()
-    if args.reingest or db.count_chunks() == 0:
-        print(f"Running ingestion from {config.DOCS_DIR} ...")
+    if args.reingest or db.count_tutorials() == 0:
+        print(f"{config.DATASET_JSON_PATH} üzerinden ingest çalıştırılıyor ...")
         ingest.run_ingestion(client)
 
-    # Guards against a stray leading BOM, which some terminals/redirected
-    # input sources (e.g. PowerShell piping text into stdin) prepend to
-    # the first line, which would otherwise stop "exit"/"quit" matching.
     bom = chr(0xFEFF)
 
-    print("\nLocal RAG assistant ready. Type a question, or 'exit' to quit.\n")
+    last_query = None
+    shown_ids = set()
+
+    print("\nBlender öğrenme rehberi hazır. Ne yapmak istediğini anlat, çıkmak için")
+    print("'exit' yaz. Bir sonraki en iyi eşleşme için 'başka' de.\n")
     while True:
         try:
             question = input("> ").strip().lstrip(bom)
@@ -64,11 +76,18 @@ def main():
         if question.lower() in {"exit", "quit"}:
             break
 
-        answer, chunks = answer_query(client, question)
+        if is_another_request(question) and last_query is not None:
+            query = last_query
+        else:
+            query = question
+            last_query = question
+            shown_ids = set()
+
+        answer, tutorial = get_recommendation(client, query, exclude_ids=shown_ids)
         print(f"\n{answer}\n")
-        sources = sorted({c["source"] for c in chunks})
-        if sources:
-            print(f"(retrieved from: {', '.join(sources)})\n")
+        if tutorial:
+            shown_ids.add(tutorial["id"])
+            print(f"(şuna dayanıyor: {tutorial['title']})\n")
 
 
 if __name__ == "__main__":

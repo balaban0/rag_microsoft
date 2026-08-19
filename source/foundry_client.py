@@ -1,13 +1,13 @@
-"""Wrapper around Foundry Local: ensures the daemon and required models are
-running, then exposes simple chat() and embed() calls via the local
-OpenAI-compatible endpoint. No cloud account or network calls are required
-once models are downloaded.
+"""Foundry Local etrafında sarmalayıcı: daemon'ın ve gerekli modellerin
+çalıştığından emin olur, sonra yerel OpenAI-uyumlu uç nokta üzerinden basit
+chat() ve embed() çağrıları sunar. Modeller indirildikten sonra bulut
+hesabı ya da ağ çağrısı gerekmez.
 
-This talks to the `foundry` CLI directly (server status/start, model
-download/load/info) rather than through foundry-local-sdk: the SDK's REST
-client targets endpoint paths (e.g. `/foundry/list`) that don't match the
-currently installed Foundry Local server version, while the CLI's JSON
-output (`-o json`) is stable and easy to parse.
+Bu, `foundry` CLI'ına doğrudan konuşur (server status/start, model
+download/load/info) -- foundry-local-sdk üzerinden değil: SDK'nın REST
+istemcisi, kurulu Foundry Local sunucu sürümüyle eşleşmeyen uç nokta
+yollarını (ör. `/foundry/list`) hedefliyor; CLI'ın JSON çıktısı
+(`-o json`) ise stabil ve ayrıştırması kolay.
 """
 import json
 import subprocess
@@ -19,9 +19,9 @@ LOAD_TIMEOUT_SECONDS = 300
 
 
 def _run(*args, timeout=60):
-    # The foundry CLI writes UTF-8 progress output (box-drawing/unicode
-    # glyphs) regardless of the console's active code page, so decode as
-    # UTF-8 explicitly instead of relying on the locale default.
+    # foundry CLI, konsolun aktif kod sayfası ne olursa olsun UTF-8 ilerleme
+    # çıktısı (kutu-çizim/unicode karakterleri) yazıyor, bu yüzden yerel
+    # ayara güvenmek yerine açıkça UTF-8 olarak decode ediyoruz.
     return subprocess.run(
         ["foundry", *args],
         capture_output=True,
@@ -68,12 +68,13 @@ class FoundryClient:
         )
         return [item.embedding for item in response.data]
 
-    def chat(self, system_prompt, user_prompt):
+    def chat(self, system_prompt, user_prompt, max_tokens=800):
         response = self._client.chat.completions.create(
             model=self._chat_model_id,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            max_tokens=max_tokens,
         )
         return response.choices[0].message.content

@@ -1,52 +1,58 @@
-"""Chunk documents from docs/, embed each chunk with Foundry Local, and
-store the results in the local SQLite database.
+"""Hazırlanmış Blender soru-cevap veri setini (dataset_raw/blender_qa.json)
+yükler, her rehberin başlık+etiket+soru metnini embed eder ve sonuçları
+yerel SQLite veritabanına yazar.
+
+Ham Stack Exchange veri dökümünden dataset_raw/blender_qa.json'ı üretmek
+için önce source/prepare_dataset.py'yi çalıştırın.
 """
+import json
+
 import source.config as config
 import source.db as db
 
-
-def chunk_text(text, max_chars=config.CHUNK_MAX_CHARS):
-    """Group paragraphs into ~1-3 paragraph passages, capped at max_chars."""
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-    chunks = []
-    current = ""
-    for para in paragraphs:
-        candidate = f"{current}\n\n{para}".strip() if current else para
-        if len(candidate) > max_chars and current:
-            chunks.append(current)
-            current = para
-        else:
-            current = candidate
-    if current:
-        chunks.append(current)
-    return chunks
+EMBED_BATCH_SIZE = 50
 
 
-def load_documents():
-    docs = {}
-    for path in sorted(config.DOCS_DIR.glob("*.md")) + sorted(config.DOCS_DIR.glob("*.txt")):
-        docs[path.name] = path.read_text(encoding="utf-8")
-    return docs
+def load_dataset():
+    if not config.DATASET_JSON_PATH.exists():
+        raise SystemExit(
+            f"{config.DATASET_JSON_PATH} bulunamadı. Önce "
+            "`python -m source.prepare_dataset` komutunu çalıştırın (bkz. README.md)."
+        )
+    with open(config.DATASET_JSON_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def embedding_text(record):
+    tags = ", ".join(record["tags"])
+    return f"{record['title']}\nTags: {tags}\n{record['question']}"
 
 
 def run_ingestion(client):
     db.init_db()
-    db.clear_chunks()
+    db.clear_tutorials()
 
-    documents = load_documents()
-    if not documents:
-        raise SystemExit(f"No documents found in {config.DOCS_DIR}")
+    records = load_dataset()
+    if not records:
+        raise SystemExit(f"{config.DATASET_JSON_PATH} içinde rehber bulunamadı")
 
     total = 0
-    for source, text in documents.items():
-        chunks = chunk_text(text)
-        if not chunks:
-            continue
-        embeddings = client.embed(chunks)
-        for content, embedding in zip(chunks, embeddings):
-            db.insert_chunk(source, content, embedding)
+    for start in range(0, len(records), EMBED_BATCH_SIZE):
+        batch = records[start:start + EMBED_BATCH_SIZE]
+        texts = [embedding_text(r) for r in batch]
+        embeddings = client.embed(texts)
+        for record, embedding in zip(batch, embeddings):
+            db.insert_tutorial(
+                source_id=record["id"],
+                title=record["title"],
+                tags=record["tags"],
+                question=record["question"],
+                answer=record["answer"],
+                score=record["score"],
+                embedding=embedding,
+            )
             total += 1
-        print(f"  ingested {len(chunks)} chunk(s) from {source}")
+        print(f"  {total}/{len(records)} rehber embed edildi")
 
-    print(f"Done. {total} chunks stored in {config.DB_PATH}")
+    print(f"Tamamlandı. {total} rehber {config.DB_PATH} içine kaydedildi")
     return total

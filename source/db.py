@@ -1,8 +1,8 @@
-"""SQLite storage for document chunks and their embedding vectors.
+"""Blender Stack Exchange rehberleri ve embedding'leri için SQLite depolama.
 
-Embeddings are stored as JSON-serialized lists in a TEXT column. This keeps
-the schema trivial (a single file, no extensions) which is appropriate for
-the small document collections this assistant targets.
+Embedding'ler bir TEXT sütununda JSON olarak saklanır. Bu, şemayı basit
+tutar (tek bir dosya, ek uzantı yok) -- bu asistanın hedeflediği rehber
+koleksiyonu boyutu (birkaç bin satır) için yeterli.
 """
 import json
 import sqlite3
@@ -11,10 +11,14 @@ from contextlib import contextmanager
 import source.config as config
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS chunks (
+CREATE TABLE IF NOT EXISTS tutorials (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source TEXT NOT NULL,
-    content TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    tags TEXT NOT NULL,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    score INTEGER NOT NULL,
     embedding TEXT NOT NULL
 );
 """
@@ -36,30 +40,52 @@ def init_db():
         conn.commit()
 
 
-def clear_chunks():
+def clear_tutorials():
     with connect() as conn:
-        conn.execute("DELETE FROM chunks")
+        conn.execute("DELETE FROM tutorials")
         conn.commit()
 
 
-def insert_chunk(source, content, embedding):
+def insert_tutorial(source_id, title, tags, question, answer, score, embedding):
     with connect() as conn:
         conn.execute(
-            "INSERT INTO chunks (source, content, embedding) VALUES (?, ?, ?)",
-            (source, content, json.dumps(embedding)),
+            "INSERT INTO tutorials "
+            "(source_id, title, tags, question, answer, score, embedding) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                source_id,
+                title,
+                json.dumps(tags),
+                question,
+                answer,
+                score,
+                json.dumps(embedding),
+            ),
         )
         conn.commit()
 
 
-def all_chunks():
+def all_tutorials():
     with connect() as conn:
-        rows = conn.execute("SELECT source, content, embedding FROM chunks").fetchall()
+        rows = conn.execute(
+            "SELECT id, source_id, title, tags, question, answer, score, embedding "
+            "FROM tutorials"
+        ).fetchall()
     return [
-        {"source": r[0], "content": r[1], "embedding": json.loads(r[2])}
+        {
+            "id": r[0],
+            "source_id": r[1],
+            "title": r[2],
+            "tags": json.loads(r[3]),
+            "question": r[4],
+            "answer": r[5],
+            "score": r[6],
+            "embedding": json.loads(r[7]),
+        }
         for r in rows
     ]
 
 
-def count_chunks():
+def count_tutorials():
     with connect() as conn:
-        return conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+        return conn.execute("SELECT COUNT(*) FROM tutorials").fetchone()[0]

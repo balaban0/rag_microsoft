@@ -1,13 +1,11 @@
-"""Functional test suite for the local RAG assistant (Phase 3 / Week 5 of
-the program plan: "Students develop test cases ... both queries it can
-answer and ones it should not be able to").
+"""Blender öğrenme rehberi asistanı için fonksiyonel test paketi.
 
-Usage:
-    python evaluate.py
+Kullanım:
+    python -m source.evaluate
 
-Runs a fixed set of answerable and unanswerable questions against the
-assistant, checks two edge cases (blank input, a very general question),
-and writes a pass/fail report with response times to TEST_RESULTS.md.
+Asistana sabit bir yanıtlanabilir/yanıtlanamaz istek seti çalıştırır, iki
+uç durumu kontrol eder (boş girdi, çok genel bir istek) ve yanıt
+süreleriyle birlikte bir geçti/kaldı raporunu TEST_RESULTS.md'ye yazar.
 """
 import subprocess
 import sys
@@ -17,32 +15,29 @@ from datetime import datetime, timezone
 import source.config as config
 import source.db as db
 from source.foundry_client import FoundryClient
-from source.main import answer_query
+from source.main import get_recommendation
 
 RESULTS_PATH = config.BASE_DIR / "TEST_RESULTS.md"
 
-# Answerable: the assistant should retrieve from the expected source and
-# answer using it. Unanswerable: not covered by docs/, so the assistant
-# should say it doesn't know rather than guessing. Greeting: casual small
-# talk, not a real question -- the assistant should respond naturally
-# instead of refusing (regression test for the "hello" -> refusal bug).
+# answerable: asistan, beklenen konuyla etiketlenmiş bir rehber getirip onu
+# kullanarak cevap vermeli. unanswerable: Blender'la hiç alakası yok, bu
+# yüzden asistan alakasız bir rehberi zorlamak yerine iyi bir eşleşme
+# bulamadığını söylemeli. greeting: gerçek bir istek değil, sıradan bir
+# selamlaşma -- asistan reddetmek yerine doğal bir şekilde cevap vermeli.
+# Sorgular kasıtlı olarak Türkçe içinde İngilizce Blender jargonu
+# barındırıyor -- gerçek kullanımda kullanıcıların büyük olasılıkla
+# yazacağı şekilde (bkz. README "Bilinen sınırlamalar").
 TEST_CASES = [
-    {"question": "What is RAG (Retrieval-Augmented Generation)?", "category": "answerable", "expected_source": "01_what_is_rag.md"},
-    {"question": "What is Foundry Local and why does this project use it?", "category": "answerable", "expected_source": "02_foundry_local.md"},
-    {"question": "How is cosine similarity used for vector search here?", "category": "answerable", "expected_source": "03_embeddings_vector_search.md"},
-    {"question": "Why is SQLite used to store document chunks?", "category": "answerable", "expected_source": "04_sqlite_basics.md"},
-    {"question": "What should the assistant do if the answer isn't in the retrieved context?", "category": "answerable", "expected_source": "05_prompt_engineering.md"},
-    {"question": "What are the layers of this assistant's architecture?", "category": "answerable", "expected_source": "06_project_architecture.md"},
-    {"question": "How is the Python code for this project organized?", "category": "answerable", "expected_source": "07_python_project_structure.md"},
-    {"question": "How does the ingestion pipeline split documents into chunks?", "category": "answerable", "expected_source": "08_chunking_strategy.md"},
-    {"question": "What's the trade-off between a small and a large chat model here?", "category": "answerable", "expected_source": "09_model_selection_tradeoffs.md"},
-    {"question": "How is this assistant tested?", "category": "answerable", "expected_source": "10_testing_and_evaluation.md"},
-    {"question": "What does app_streamlit.py do?", "category": "answerable", "expected_source": "11_web_ui_streamlit.md"},
-    {"question": "How do I add my own documents to the knowledge base?", "category": "answerable", "expected_source": "12_faq_troubleshooting.md"},
-    {"question": "What does the Mirror Modifier do in Blender?", "category": "answerable", "expected_source": "13_blender_modifiers_and_texturing.md"},
-    {"question": "What is ScriptableRenderPass used for in Unity's URP?", "category": "answerable", "expected_source": "14_unity_urp_rendering.md"},
-    {"question": "How do branching dialogue trees support player agency?", "category": "answerable", "expected_source": "15_narrative_design_player_agency.md"},
-    {"question": "What is an LOD system used for in game engines?", "category": "answerable", "expected_source": "16_mesh_topology_and_lod.md"},
+    {"question": "How do I use the mirror modifier for symmetric modeling?", "category": "answerable", "expected_tag": "modifiers"},
+    {"question": "How do I write a python script to automate a task in Blender?", "category": "answerable", "expected_tag": "python"},
+    {"question": "How do I set up realistic materials and shaders?", "category": "answerable", "expected_tag": "materials"},
+    {"question": "How do I do UV mapping before texturing?", "category": "answerable", "expected_tag": "uv"},
+    {"question": "How do I animate an object along a path?", "category": "answerable", "expected_tag": "animation"},
+    {"question": "How do I set up a particle system for hair or grass?", "category": "answerable", "expected_tag": "particles"},
+    {"question": "How do I speed up rendering in the Cycles render engine?", "category": "answerable", "expected_tag": "cycles-render-engine"},
+    {"question": "How do I use the shader node editor?", "category": "answerable", "expected_tag": "node-editor"},
+    {"question": "How do I use compositing nodes for post-render processing?", "category": "answerable", "expected_tag": "compositing-nodes"},
+    {"question": "How do I select and edit vertices in edit mode?", "category": "answerable", "expected_tag": "vertices"},
     {"question": "What is the capital of France?", "category": "unanswerable"},
     {"question": "Who won the 2018 FIFA World Cup?", "category": "unanswerable"},
     {"question": "What is the current price of Bitcoin?", "category": "unanswerable"},
@@ -50,24 +45,25 @@ TEST_CASES = [
     {"question": "thanks!", "category": "greeting"},
 ]
 
-# Deliberately root-word broad: the model paraphrases its refusal every
-# time ("don't have that specific information", "do not contain...",
-# "not available in the documents"...) rather than reproducing the system
-# prompt's exact fallback sentence verbatim, so exact/near-exact phrase
-# matching produced false failures during testing on genuinely correct
-# refusals. These roots are unlikely to appear in a real, informative
-# answer, so they stay a reasonable (if inherently approximate) signal.
+# Kasıtlı olarak kök-kelime bazında geniş tutuldu: model her seferinde
+# reddini farklı şekilde ifade ediyor ("uygun bir eşleşme bulamadım",
+# "bununla ilgili bir şey yok", "alakalı değil"...), sistem promptundaki
+# tam cümleyi birebir tekrarlamıyor -- bu yüzden tam/yakın eşleşme
+# kontrolü, gerçekten doğru olan reddetmelerde yanlış başarısızlıklara
+# yol açtı. Bu kökler gerçek, konuyla ilgili bir rehberde geçmesi
+# beklenmeyen kelimeler, dolayısıyla makul (yine de doğası gereği
+# yaklaşık) bir sinyal olarak kalıyor.
 FALLBACK_MARKERS = (
-    "don't have",
-    "do not have",
-    "not contain",
-    "no information",
-    "not available",
-    "cannot find",
-    "unable to find",
-    "i don't know",
-    "not covered",
-    "outside the scope",
+    "eşleşme bulamadım",
+    "eşleşme yok",
+    "eşleşme bulunamadı",
+    "uygun bir öneri bulamadım",
+    "ilgili değil",
+    "alakalı değil",
+    "alakası yok",
+    "bilgi tabanımda yok",
+    "bilgim yok",
+    "kapsamı dışında",
 )
 
 
@@ -76,126 +72,131 @@ def looks_like_fallback(answer):
     return any(marker in lower for marker in FALLBACK_MARKERS)
 
 
-# The greeting check is intentionally narrower than FALLBACK_MARKERS: a
-# warm, on-topic reply to "thanks!" may still mention "topics not covered
-# in these documents" while explaining what it can help with, which isn't
-# a failure. What we're actually regression-testing is the original bug
-# (a greeting getting the system prompt's exact hard-coded refusal
-# sentence), so check for that sentence specifically rather than any
-# scope-related phrase anywhere in the reply.
-FALLBACK_SENTENCE = "i don't have that information in my documents"
+# Selamlaşma kontrolü, FALLBACK_MARKERS'tan kasıtlı olarak daha dar: "teşekkürler!"
+# gibi bir mesaja verilen sıcak, konuyla ilgili bir cevap, neye yardımcı
+# olamayacağından da bahsedebilir -- bu bir başarısızlık değil. Burada asıl
+# regresyon testi edilen şey, bir selamlaşmanın sistem promptundaki tam,
+# sabit-kodlanmış ret cümlesini alması, bu yüzden herhangi bir kapsam
+# ifadesi yerine özellikle bu cümleyi arıyoruz.
+FALLBACK_SENTENCE = config.NO_MATCH_MESSAGE.lower()
 
 
 def run_case(client, case):
     start = time.perf_counter()
-    answer, chunks = answer_query(client, case["question"])
+    answer, tutorial = get_recommendation(client, case["question"])
     elapsed = time.perf_counter() - start
-    sources = sorted({c["source"] for c in chunks})
+    tags = tutorial["tags"] if tutorial else []
 
     if case["category"] == "answerable":
-        passed = case["expected_source"] in sources
+        passed = case["expected_tag"] in tags
     elif case["category"] == "greeting":
         passed = FALLBACK_SENTENCE not in answer.lower()
     else:  # unanswerable
         passed = looks_like_fallback(answer)
 
-    return {**case, "sources": sources, "passed": passed, "elapsed": elapsed, "answer": answer}
+    return {**case, "tags": tags, "title": tutorial["title"] if tutorial else None,
+            "passed": passed, "elapsed": elapsed, "answer": answer}
 
 
 def run_general_question_case(client):
-    question = "Tell me something interesting."
+    question = "I have a few free hours tonight, what should I try in Blender?"
     start = time.perf_counter()
-    answer, chunks = answer_query(client, question)
+    answer, tutorial = get_recommendation(client, question)
     elapsed = time.perf_counter() - start
     return {
         "question": question,
         "elapsed": elapsed,
         "answer": answer,
-        "note": "No hard pass/fail — logged to confirm the assistant handles a vague, "
-        "non-document-specific question without crashing.",
+        "note": "Kesin geçti/kaldı yok — asistanın belirsiz, açık uçlu bir isteği "
+        "hatasız işlediğini doğrulamak için kaydediliyor.",
     }
 
 
 def run_blank_input_case():
-    """Drive the real CLI with a blank line followed by a real question,
-    confirming main.py's input loop skips empty input instead of treating
-    it as a query, then still answers normally and exits cleanly."""
-    script_input = "\nWhat is RAG?\nexit\n"
+    """Gerçek CLI'yi boş bir satır, ardından gerçek bir soru ile çalıştırır;
+    main.py'nin girdi döngüsünün boş girdiyi bir sorgu gibi değil, atlayarak
+    geçtiğini, sonra bir sonraki gerçek soruyu normal şekilde yanıtlayıp
+    temiz çıktığını doğrular."""
+    script_input = "\nHow do I use the mirror modifier?\nexit\n"
     result = subprocess.run(
-        [sys.executable, str(config.BASE_DIR / "main.py")],
+        [sys.executable, "-m", "source.main"],
         input=script_input,
         capture_output=True,
         text=True,
         cwd=config.BASE_DIR,
         timeout=120,
     )
-    passed = result.returncode == 0 and "retrieve" in result.stdout.lower()
+    passed = result.returncode == 0 and "dayanıyor" in result.stdout.lower()
     return {"passed": passed, "returncode": result.returncode, "stdout_tail": result.stdout[-400:]}
 
 
 def format_report(results, general_case, blank_case):
     lines = []
-    lines.append("# Test Results\n")
-    lines.append(f"Generated: {datetime.now(timezone.utc).isoformat(timespec='seconds')}\n")
+    lines.append("# Test Sonuçları\n")
+    lines.append(f"Oluşturulma: {datetime.now(timezone.utc).isoformat(timespec='seconds')}\n")
 
     total = len(results)
     passed = sum(1 for r in results if r["passed"])
     avg_time = sum(r["elapsed"] for r in results) / total if total else 0
     max_time = max((r["elapsed"] for r in results), default=0)
 
-    lines.append(f"**Summary:** {passed}/{total} test cases passed. "
-                 f"Avg response time {avg_time:.2f}s, max {max_time:.2f}s.\n")
+    lines.append(f"**Özet:** {passed}/{total} test vakası geçti. "
+                 f"Ortalama yanıt süresi {avg_time:.2f}sn, en yüksek {max_time:.2f}sn.\n")
     if avg_time > 3:
-        lines.append(f"> Note: the program plan targets ~1-3s per question on a typical "
-                      f"laptop; {avg_time:.1f}s average here likely reflects this machine's "
-                      f"hardware (no dedicated GPU acceleration for the chosen model) rather "
-                      f"than a pipeline issue. See README 'Known limitations' for mitigation "
-                      f"options (smaller model, fewer retrieved chunks).\n")
+        lines.append(f"> Not: buradaki {avg_time:.1f}sn'lik ortalama, muhtemelen bir "
+                      f"pipeline sorunundan çok bu makinenin donanımını (seçilen model "
+                      f"için özel GPU hızlandırması yok) yansıtıyor. Azaltma seçenekleri "
+                      f"(daha küçük model, daha düşük TOP_K) için README'deki 'Bilinen "
+                      f"sınırlamalar' bölümüne bakın.\n")
 
-    lines.append("## Answerable / Unanswerable Queries\n")
-    lines.append("| # | Category | Question | Expected source | Retrieved sources | Time (s) | Result |")
-    lines.append("|---|----------|----------|------------------|--------------------|----------|--------|")
+    lines.append("## Yanıtlanabilir / Yanıtlanamaz İstekler\n")
+    lines.append("| # | Kategori | Soru | Beklenen etiket | Getirilen rehber | Süre (sn) | Sonuç |")
+    lines.append("|---|----------|------|------------------|--------------------|-----------|--------|")
     for i, r in enumerate(results, 1):
-        expected = r.get("expected_source", "-")
-        sources = ", ".join(r["sources"]) if r["sources"] else "-"
-        status = "PASS" if r["passed"] else "FAIL"
+        expected = r.get("expected_tag", "-")
+        title = r["title"] or "-"
+        status = "GEÇTİ" if r["passed"] else "KALDI"
         lines.append(
-            f"| {i} | {r['category']} | {r['question']} | {expected} | {sources} | "
+            f"| {i} | {r['category']} | {r['question']} | {expected} | {title} | "
             f"{r['elapsed']:.2f} | {status} |"
         )
 
-    lines.append("\n## Edge Cases\n")
-    lines.append(f"- **Blank input then a real question (via CLI):** "
-                  f"{'PASS' if blank_case['passed'] else 'FAIL'} "
-                  f"(exit code {blank_case['returncode']}) — the CLI must skip empty lines "
-                  f"instead of querying with them, then still answer the next real question.")
-    lines.append(f"- **Vague/general question:** logged only, {general_case['elapsed']:.2f}s response time. "
-                  f"{general_case['note']}")
+    lines.append("\n## Uç Durumlar\n")
+    lines.append(f"- **Boş girdi, ardından gerçek bir soru (CLI üzerinden):** "
+                  f"{'GEÇTİ' if blank_case['passed'] else 'KALDI'} "
+                  f"(çıkış kodu {blank_case['returncode']}) — CLI, boş satırları bir "
+                  f"sorgu olarak işlemek yerine atlamalı, sonra bir sonraki gerçek "
+                  f"soruyu yine de yanıtlamalı.")
+    lines.append(f"- **Belirsiz/açık uçlu istek:** sadece kaydedildi, "
+                  f"{general_case['elapsed']:.2f}sn yanıt süresi. {general_case['note']}")
     lines.append(f"\n> \"{general_case['question']}\" -> {general_case['answer'][:300]}")
 
-    lines.append("\n## Failures in detail\n")
+    lines.append("\n## Başarısızlıkların Detayı\n")
     failures = [r for r in results if not r["passed"]]
     if not failures:
-        lines.append("None.")
+        lines.append("Yok.")
     else:
         for r in failures:
-            lines.append(f"- **{r['question']}** (expected source: {r.get('expected_source', '-')}, "
-                          f"got: {', '.join(r['sources']) or 'none'})\n  > {r['answer'][:300]}")
+            lines.append(f"- **{r['question']}** (beklenen etiket: {r.get('expected_tag', '-')}, "
+                          f"gelen: {r['title'] or 'eşleşme yok'})\n  > {r['answer'][:300]}")
 
     return "\n".join(lines) + "\n"
 
 
 def main():
-    print("Initializing Foundry Local models...")
+    print("Foundry Local modelleri başlatılıyor...")
     client = FoundryClient(config.CHAT_MODEL_ALIAS, config.EMBEDDING_MODEL_ALIAS)
     db.init_db()
-    if db.count_chunks() == 0:
-        raise SystemExit("No chunks in the database — run `python main.py` once first to ingest docs/.")
+    if db.count_tutorials() == 0:
+        raise SystemExit(
+            "Veritabanında rehber yok — önce `python -m source.prepare_dataset`, "
+            "sonra `python -m source.main` çalıştırıp bilgi tabanını oluşturun."
+        )
 
-    print(f"Running {len(TEST_CASES)} test cases...")
+    print(f"{len(TEST_CASES)} test vakası çalıştırılıyor...")
     results = [run_case(client, case) for case in TEST_CASES]
 
-    print("Running edge cases (vague question, blank input via CLI)...")
+    print("Uç durumlar çalıştırılıyor (belirsiz istek, CLI üzerinden boş girdi)...")
     general_case = run_general_question_case(client)
     blank_case = run_blank_input_case()
 
@@ -203,9 +204,9 @@ def main():
     RESULTS_PATH.write_text(report, encoding="utf-8")
 
     passed = sum(1 for r in results if r["passed"])
-    print(f"\n{passed}/{len(results)} test cases passed. Report written to {RESULTS_PATH}")
+    print(f"\n{passed}/{len(results)} test vakası geçti. Rapor {RESULTS_PATH} konumuna yazıldı")
     if not blank_case["passed"]:
-        print("WARNING: blank-input edge case failed.")
+        print("UYARI: boş girdi uç durumu başarısız oldu.")
 
 
 if __name__ == "__main__":
