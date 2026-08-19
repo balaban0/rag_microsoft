@@ -83,7 +83,7 @@ foundry server start
 #    cevabı olan soruları filtrele, HTML'i temizle, JSON'a yaz
 python -m source.prepare_dataset
 
-# 2) Tarifleri değil, rehberleri işle: her soru+cevabı embed edip
+# 2) Her soru+cevabı embed edip
 #    data/rag.db'ye yaz
 python -m source.main
 
