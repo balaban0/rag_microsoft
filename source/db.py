@@ -8,7 +8,7 @@ import json
 import sqlite3
 from contextlib import contextmanager
 
-import config
+import source.config as config
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chunks (

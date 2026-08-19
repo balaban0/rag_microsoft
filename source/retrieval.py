@@ -6,8 +6,8 @@ Python is simple and fast enough -- no vector database needed.
 """
 import numpy as np
 
-import config
-import db
+import source.config as config
+import source.db as db
 
 
 def cosine_similarity(a, b):

@@ -14,10 +14,10 @@ import sys
 import time
 from datetime import datetime, timezone
 
-import config
-import db
-from foundry_client import FoundryClient
-from main import answer_query
+import source.config as config
+import source.db as db
+from source.foundry_client import FoundryClient
+from source.main import answer_query
 
 RESULTS_PATH = config.BASE_DIR / "TEST_RESULTS.md"
 

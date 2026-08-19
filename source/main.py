@@ -7,11 +7,11 @@ Usage:
 import argparse
 import sys
 
-import config
-import db
-import ingest
-import retrieval
-from foundry_client import FoundryClient
+import source.config as config
+import source.db as db
+import source.ingest as ingest
+import source.retrieval as retrieval
+from source.foundry_client import FoundryClient
 
 
 def build_context(chunks):

@@ -6,10 +6,10 @@ Run with: streamlit run app_streamlit.py
 """
 import streamlit as st
 
-import config
-import db
-from foundry_client import FoundryClient
-from main import answer_query
+import source.config as config
+import source.db as db
+from source.foundry_client import FoundryClient
+from source.main import answer_query
 
 st.set_page_config(page_title="Local RAG Assistant")
 

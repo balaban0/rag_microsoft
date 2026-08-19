@@ -1,8 +1,8 @@
 """Chunk documents from docs/, embed each chunk with Foundry Local, and
 store the results in the local SQLite database.
 """
-import config
-import db
+import source.config as config
+import source.db as db
 
 
 def chunk_text(text, max_chars=config.CHUNK_MAX_CHARS):
